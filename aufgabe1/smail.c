@@ -11,6 +11,10 @@
 #define SERVER "faui03.cs.fau.de"
 #define PORT "25"
 
+char *fqdn;
+FILE *rx, *tx;
+
+
 void die(char* death_message){
 	perror(death_message);
 	exit(EXIT_FAILURE);
@@ -77,12 +81,14 @@ for example:
 100 welcome user -> 100
 */
 long statcode(char *buf){
-	
 	//parse string to long
 	errno = 0;
 	char* endptr;
 	long x = strtol(buf, &endptr, 10);
-	if(errno) die("strtol");
+	if(errno == EINVAL)
+		die("no conversion could be	performed");
+	if(errno == ERANGE)
+		die("The resulting value was out of range");
 
 	//check whether no digits were found
 	if(endptr == buf)
@@ -91,7 +97,7 @@ long statcode(char *buf){
 	return x; 
 }
 
-void handle_dialog(FILE** rx. FILE** tx, char* uaddr, char* argv[]){
+int handle_dialog(char* uaddr, char* argv[]){
 	//recepient address
 	char *raddr = argv[2];
 	//email subject
@@ -99,7 +105,14 @@ void handle_dialog(FILE** rx. FILE** tx, char* uaddr, char* argv[]){
 	//content of reponse
 	char buf[KiB + 2];
 	
-	while(fgets(buf, sizeof(buf), rx)){
+	//to ensure chornological order of communication exchange
+	int ctr = 0;
+	//wait for response from server
+	for(;;){
+		if(!fgets(buf, sizeof(buf), rx)) continue;
+		/*
+		in case a response if fetched
+		*/
 		size_t len = strlen(buf);
 		/* in case line exceeds KiB */
 		if(len > sizeof(buf) && buf[len-1] != '\n'){
@@ -122,8 +135,17 @@ void handle_dialog(FILE** rx. FILE** tx, char* uaddr, char* argv[]){
 			perror("invalid status code");
 			continue;
 		}
+		
+		if(ctr == 0){
+			//make sure status 220 was received
+			if(stcd != 220){
+				perror("%ld: status 220 expected", stcd);
+				return 0;
+			}
+			
+		}
+		if(ferror(rx)) die("fgets");
 	}
-	if(ferror(rx)) die("fgets");
 }
 
 int main(int argc, char *argv[]){
@@ -138,15 +160,14 @@ int main(int argc, char *argv[]){
     if(!uaddr)
     	die("failed to create email address");
     
-	//set hints to match with server protocol
     struct addrinfo hints = {
-        .ai_flags = AI_CANONNAME,
+        .ai_flags = AI_CANONNAME, // for host name
         .ai_family = AF_INET,  // ipv4 only
         .ai_socktype = SOCK_STREAM,
     };
 	
     struct addrinfo *server_info;
-    //to check for error for addrinfo
+    //check for errors in addrinfo
     int s;
     //get address infromation for the FAU server
     //save to server_info
@@ -160,9 +181,22 @@ int main(int argc, char *argv[]){
     if(sock == -1)
     	die("Failed to connect");
     freeaddrinfo(server_info);
-    
+	
+	//determine host name
+	struct addrinfo *host_info;
+	char name[KiB + 1];
+	if(!gethostname(name, KiB)
+		die("gethostname");
+	
+	if ( !(s = getaddrinfo(name, NULL, &hints, &host_info)) ){
+	   fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
+       exit(EXIT_FAILURE);
+    }
+	fqdn = host_info->ai_canonname;
+	freeaddrinfo(host_info);
+	
     // FILE * fuers Empfangen erstellen
-	FILE *rx = fdopen(sock, "r");
+	rx = fdopen(sock, "r");
 	if(!rx)
 		close(sock);
 	// Duplikat des Socket-Deskriptors anlegen
@@ -170,7 +204,7 @@ int main(int argc, char *argv[]){
 	if (sock_copy < 0)
 		close(sock);
 	// FILE * fuers Senden erstellen
-	FILE *tx = fdopen(sock_copy, "w");
+	tx = fdopen(sock_copy, "w");
 	if(!tx){
 		if(fclose(rx)) perror("fclose: rx");
 		close(sock);
@@ -179,7 +213,7 @@ int main(int argc, char *argv[]){
 	}
     
 	//handle dialogue with server
-	handle_dialog(&rx, &tx, uaddr, argv);
+	handle_dialog(uaddr, argv);
 	
 	//close all files free all data
     if( fclose(rx) || fclose(tx) ) perror("fclose");
