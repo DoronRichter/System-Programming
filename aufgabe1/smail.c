@@ -68,14 +68,62 @@ int establish_connection(struct addrinfo** server_info){
     }
     
     return sock;
+
 }
 
-void handle_dialog(FILE** rx. FILE** tx, char* uaddr, char** argv[]){
+/*
+get status code from line in long format
+for example:
+100 welcome user -> 100
+*/
+long statcode(char *buf){
+	
+	//parse string to long
+	errno = 0;
+	char* endptr;
+	long x = strtol(buf, &endptr, 10);
+	if(errno) die("strtol");
+
+	//check whether no digits were found
+	if(endptr == buf)
+		return 0;
+	
+	return x; 
+}
+
+void handle_dialog(FILE** rx. FILE** tx, char* uaddr, char* argv[]){
 	//recepient address
-	char *raddr = *argv[2];
-	for(;;){
+	char *raddr = argv[2];
+	//email subject
+	char *betreff = argv[1];
+	//content of reponse
+	char buf[KiB + 2];
+	
+	while(fgets(buf, sizeof(buf), rx)){
+		size_t len = strlen(buf);
+		/* in case line exceeds KiB */
+		if(len > sizeof(buf) && buf[len-1] != '\n'){
+			int c;
+			//look for end of end of file notation
+			while( (c = fgetc(rx)) != EOF){
+				if (c == '\n') break;
+			}
+			if(ferror(rx)) die("fgetcs");
+			continue;
+		}
+		//repalce end of line with null terminator
+		//to not read any further
+		if(buf[len-1] == '\n')
+			buf[len-1] = '\0';
 		
+		//Zeile bearbeiten
+		long stcd = statcode(buf);
+		if(!stcd || stcd > 999){
+			perror("invalid status code");
+			continue;
+		}
 	}
+	if(ferror(rx)) die("fgets");
 }
 
 int main(int argc, char *argv[]){
@@ -106,27 +154,37 @@ int main(int argc, char *argv[]){
        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
        exit(EXIT_FAILURE);
     }
+	
 	//establish a socket of communication between client and server
 	int sock = establish_connection(&server_info);
     if(sock == -1)
     	die("Failed to connect");
     freeaddrinfo(server_info);
     
-    // FILE * fürs Empfangen erstellen
+    // FILE * fuers Empfangen erstellen
 	FILE *rx = fdopen(sock, "r");
 	if(!rx)
-		die("fdopen: rx");
+		close(sock);
 	// Duplikat des Socket-Deskriptors anlegen
 	int sock_copy = dup(sock);
 	if (sock_copy < 0)
-		die("dup");
+		close(sock);
 	// FILE * fuers Senden erstellen
 	FILE *tx = fdopen(sock_copy, "w");
-	if(!tx)
+	if(!tx){
+		if(fclose(rx)) perror("fclose: rx");
+		close(sock);
+		close(sock_copy);
 		die("fdopen: rx");
+	}
     
-    handle_dialog(&rx, &tx, uaddr, &argv);
+	//handle dialogue with server
+	handle_dialog(&rx, &tx, uaddr, argv);
+	
+	//close all files free all data
+    if( fclose(rx) || fclose(tx) ) perror("fclose");
+	close(sock); close(sock_copy);
+	free(uaddr);
     
-    free(uaddr);
-    return EXIT_SUCCESS;
+	return EXIT_SUCCESS;
 }
