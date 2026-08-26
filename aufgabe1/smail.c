@@ -35,17 +35,17 @@ char *get_username(){
 	return upw->pw_name;
 }
 
-char *get_sender_address(char *username){
+char *strmrg(char *username, char *ending){
 	char*  address;
 	size_t maxsize;
 	
-	maxsize = strlen("verylongusername") + strlen("@cip.cs.fau.de") + 1;
+	maxsize = strlen(username) + strlen(ending) + 1;
 	address = malloc(sizeof(*address) * maxsize);
 	if(!buff)
 		die("malloc");
 	
 	//username@cip.cs.fau.de
-	strcat(address, username);
+	strcpy(address, username);
 	strcat(address, "@cip.cs.fau.de");
 	
 	return address;
@@ -96,6 +96,9 @@ long statcode(char *buf){
 	
 	return x; 
 }
+void fwrite(char *msg){
+
+}
 
 int handle_dialog(char* uaddr, char* argv[]){
 	//recepient address
@@ -139,13 +142,16 @@ int handle_dialog(char* uaddr, char* argv[]){
 		if(ctr == 0){
 			//make sure status 220 was received
 			if(stcd != 220){
-				perror("%ld: status 220 expected", stcd);
-				return 0;
+				fprintf(stderr, "%ld: status 220 expected\n", stcd);
+				fprintf(stdout, "last message received: %s\n", buf);
+				return -1;
 			}
 			
 		}
 		if(ferror(rx)) die("fgets");
 	}
+	
+	return 0;
 }
 
 int main(int argc, char *argv[]){
@@ -156,7 +162,7 @@ int main(int argc, char *argv[]){
     //get user name, kinda self explanatory
     char *usrn = get_username();
     //use usrn to create a sender address
-    char *uaddr = get_sender_address(usrn);
+    char *uaddr = strmrg(usrn, "@cip.cs.fau.de");
     if(!uaddr)
     	die("failed to create email address");
     
@@ -188,12 +194,15 @@ int main(int argc, char *argv[]){
 	if(!gethostname(name, KiB)
 		die("gethostname");
 	
-	if ( !(s = getaddrinfo(name, NULL, &hints, &host_info)) ){
+	if ( (s = getaddrinfo(name, NULL, &hints, &host_info)) != 0 ){
 	   fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
        exit(EXIT_FAILURE);
     }
-	fqdn = host_info->ai_canonname;
+    
+	fqdn = strmrg( host_info->ai_canonname, ".informatik.uni-erlangen.de" );
 	freeaddrinfo(host_info);
+	if(!fdqn)
+		die("strcat");
 	
     // FILE * fuers Empfangen erstellen
 	rx = fdopen(sock, "r");
@@ -213,12 +222,14 @@ int main(int argc, char *argv[]){
 	}
     
 	//handle dialogue with server
-	handle_dialog(uaddr, argv);
+	if ( handle_dialog(uaddr, argv) ) 
+		perror("handle dialog");
 	
 	//close all files free all data
     if( fclose(rx) || fclose(tx) ) perror("fclose");
 	close(sock); close(sock_copy);
 	free(uaddr);
+    freeaddrinfo(host_info);
     
 	return EXIT_SUCCESS;
 }
