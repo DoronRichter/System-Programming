@@ -12,7 +12,7 @@
 #define PORT "25"
 
 int EXIT_STATUS = EXIT_SUCCESS
-char *fqdn, *uaddr, *raddr. *sn;
+char *fqdn, *uaddr;
 FILE *rx, *tx;
 
 
@@ -104,10 +104,8 @@ void write_terminal(char *msg){
 
 int handle_line(char* buf, long cd){
 	// read server response
-	if(!fgets(buf, sizeof(buf), rx)){
-		perror("fgets");
-		return -1;
-	}
+	if(!fgets(buf, sizeof(buf), rx))
+		die("fgets");
 	
 	size_t len = strlen(buf);
 	/* in case line exceeds KiB */
@@ -117,33 +115,43 @@ int handle_line(char* buf, long cd){
 		while( (c = fgetc(rx)) != EOF){
 			if (c == '\n') break;
 		}
-		if(ferror(rx)) die("fgetcs");
-		return -1;
+		if(ferror(rx)) 
+			die("fgetcs");
 	}
 	// repalce end of line with null terminator
 	// to not read any further
 	if(buf[len-1] == '\n')
 		buf[len-1] = '\0';
 	
-	if(ferror(rx)) return -1;
+	if(ferror(rx)) die("ferror");
 	
 	
 	//verify status code
 	long stcd = statcode(buf);
 	if(stcd != cd){
-		perror("invalid status code");
 		write_terminal(buf);
-		return -1;
+		die("invalid status code");
 	}
-	
-	return 0;
 }
 
 void handle_dialog(char* uaddr, char* argv[]){
-	//recepient address
-	char *raddr = argv[2];
-	//email subject
-	char *betreff = argv[1];
+	// sender name
+	char *sn;
+	// recepient address
+    char *raddr = argv[2];
+    // [Sender Name  <Subect>] 
+    char *str = argv[1];
+    
+    // full name of user
+    sn = strtok(str, "<");
+    if(!sn)
+    	die("strtok"); 
+    	
+    // subject
+    char *subj = strtok(NULL, >);
+    int is_there_subject = 1 ? subj : 0;
+     
+    
 	//content of reponse
 	char buf[KiB + 2];
 	
@@ -168,7 +176,7 @@ void handle_dialog(char* uaddr, char* argv[]){
 		return;
 	}
 	fprintf(tx, "DATA\r\n", uaddr);
-	if ( handle_line(buf, (long) 350) ){
+	if ( handle_line(buf, (long) 354) ){
 		EXIT_STATUS = EXIT_FAILURE;
 		return;
 	}
@@ -185,16 +193,6 @@ int main(int argc, char *argv[]){
     uaddr = strmrg(usrn, "@cip.cs.fau.de");
     if(!uaddr)
     	die("failed to read user email address");
-    
-    if (!( sn = malloc(sizeof(KiB) ))
-    	die("malloc");
-    	
-    raddr = argv[2];
-    char *str = argv[1];
-    //get full name of user
-    sn = strtok(str, "<");
-    if(!sn)
-    	die("strtok"); 
     
     struct addrinfo hints = {
         .ai_flags = AI_CANONNAME, // for host name
