@@ -11,7 +11,8 @@
 #define SERVER "faui03.cs.fau.de"
 #define PORT "25"
 
-char *fqdn;
+int EXIT_STATUS = EXIT_SUCCESS
+char *fqdn, *uaddr, *raddr. *sn;
 FILE *rx, *tx;
 
 
@@ -96,11 +97,49 @@ long statcode(char *buf){
 	
 	return x; 
 }
-void fwrite(char *msg){
+
+void write_terminal(char *msg){
 
 }
 
-int handle_dialog(char* uaddr, char* argv[]){
+int handle_line(char* buf, long cd){
+	// read server response
+	if(!fgets(buf, sizeof(buf), rx)){
+		perror("fgets");
+		return -1;
+	}
+	
+	size_t len = strlen(buf);
+	/* in case line exceeds KiB */
+	if(len > sizeof(buf) && buf[len-1] != '\n'){
+		int c;
+		//look for end of end of file notation
+		while( (c = fgetc(rx)) != EOF){
+			if (c == '\n') break;
+		}
+		if(ferror(rx)) die("fgetcs");
+		return -1;
+	}
+	// repalce end of line with null terminator
+	// to not read any further
+	if(buf[len-1] == '\n')
+		buf[len-1] = '\0';
+	
+	if(ferror(rx)) return -1;
+	
+	
+	//verify status code
+	long stcd = statcode(buf);
+	if(stcd != cd){
+		perror("invalid status code");
+		write_terminal(buf);
+		return -1;
+	}
+	
+	return 0;
+}
+
+void handle_dialog(char* uaddr, char* argv[]){
 	//recepient address
 	char *raddr = argv[2];
 	//email subject
@@ -108,50 +147,31 @@ int handle_dialog(char* uaddr, char* argv[]){
 	//content of reponse
 	char buf[KiB + 2];
 	
-	//to ensure chornological order of communication exchange
-	int ctr = 0;
-	//wait for response from server
-	for(;;){
-		if(!fgets(buf, sizeof(buf), rx)) continue;
-		/*
-		in case a response if fetched
-		*/
-		size_t len = strlen(buf);
-		/* in case line exceeds KiB */
-		if(len > sizeof(buf) && buf[len-1] != '\n'){
-			int c;
-			//look for end of end of file notation
-			while( (c = fgetc(rx)) != EOF){
-				if (c == '\n') break;
-			}
-			if(ferror(rx)) die("fgetcs");
-			continue;
-		}
-		//repalce end of line with null terminator
-		//to not read any further
-		if(buf[len-1] == '\n')
-			buf[len-1] = '\0';
-		
-		//Zeile bearbeiten
-		long stcd = statcode(buf);
-		if(!stcd || stcd > 999){
-			perror("invalid status code");
-			continue;
-		}
-		
-		if(ctr == 0){
-			//make sure status 220 was received
-			if(stcd != 220){
-				fprintf(stderr, "%ld: status 220 expected\n", stcd);
-				fprintf(stdout, "last message received: %s\n", buf);
-				return -1;
-			}
-			
-		}
-		if(ferror(rx)) die("fgets");
+	/** bearbeiten des Dialogs **/
+	if ( handle_line(buf, (long) 220) ){
+		EXIT_STATUS = EXIT_FAILURE;
+		return;
 	}
-	
-	return 0;
+	fprintf(tx, "HELO %s\r\n", fdqn);
+	if ( handle_line(buf, (long) 250) ){
+		EXIT_STATUS = EXIT_FAILURE;
+		return;
+	}
+	fprintf(tx, "MAIL FROM:<%s>\r\n", uaddr);
+	if ( handle_line(buf, (long) 250) ){
+		EXIT_STATUS = EXIT_FAILURE;
+		return;
+	}
+	fprintf(tx, "RCPT TO:%s\r\n", raddr);
+	if ( handle_line(buf, (long) 250) ){
+		EXIT_STATUS = EXIT_FAILURE;
+		return;
+	}
+	fprintf(tx, "DATA\r\n", uaddr);
+	if ( handle_line(buf, (long) 350) ){
+		EXIT_STATUS = EXIT_FAILURE;
+		return;
+	}
 }
 
 int main(int argc, char *argv[]){
@@ -162,9 +182,19 @@ int main(int argc, char *argv[]){
     //get user name, kinda self explanatory
     char *usrn = get_username();
     //use usrn to create a sender address
-    char *uaddr = strmrg(usrn, "@cip.cs.fau.de");
+    uaddr = strmrg(usrn, "@cip.cs.fau.de");
     if(!uaddr)
-    	die("failed to create email address");
+    	die("failed to read user email address");
+    
+    if (!( sn = malloc(sizeof(KiB) ))
+    	die("malloc");
+    	
+    raddr = argv[2];
+    char *str = argv[1];
+    //get full name of user
+    sn = strtok(str, "<");
+    if(!sn)
+    	die("strtok"); 
     
     struct addrinfo hints = {
         .ai_flags = AI_CANONNAME, // for host name
@@ -222,8 +252,7 @@ int main(int argc, char *argv[]){
 	}
     
 	//handle dialogue with server
-	if ( handle_dialog(uaddr, argv) ) 
-		perror("handle dialog");
+	handle_dialog(uaddr, argv) 
 	
 	//close all files free all data
     if( fclose(rx) || fclose(tx) ) perror("fclose");
@@ -231,5 +260,5 @@ int main(int argc, char *argv[]){
 	free(uaddr);
     freeaddrinfo(host_info);
     
-	return EXIT_SUCCESS;
+	return EXIT_STATUS;
 }
